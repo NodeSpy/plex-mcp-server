@@ -1,8 +1,13 @@
 import os
 import time
+import requests
+import urllib3
 from mcp.server.fastmcp import FastMCP # type: ignore
 from plexapi.server import PlexServer # type: ignore
 from plexapi.myplex import MyPlexAccount # type: ignore
+
+# Disable SSL warnings for local servers with self-signed certificates
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Add dotenv for .env file support
 try:
@@ -53,9 +58,13 @@ def connect_to_plex() -> PlexServer:
     
     for attempt in range(max_retries):
         try:
+            # Create a session with SSL verification disabled for self-signed certificates
+            session = requests.Session()
+            session.verify = False
+
             # Try connecting directly with a token
             if plex_token:
-                server = PlexServer(plex_url, plex_token, timeout=CONNECTION_TIMEOUT)
+                server = PlexServer(plex_url, plex_token, timeout=CONNECTION_TIMEOUT, session=session)
                 last_connection_time = current_time
                 return server
             
@@ -74,7 +83,7 @@ def connect_to_plex() -> PlexServer:
                             # Try each connection until one works
                             for connection in resource.connections:
                                 try:
-                                    server = PlexServer(connection.uri, account.authenticationToken, timeout=CONNECTION_TIMEOUT)
+                                    server = PlexServer(connection.uri, account.authenticationToken, timeout=CONNECTION_TIMEOUT, session=session)
                                     last_connection_time = current_time
                                     return server
                                 except:

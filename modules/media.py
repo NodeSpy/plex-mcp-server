@@ -548,7 +548,7 @@ async def media_edit_metadata(media_title: str, library_name: str = None,
     """
     try:
         plex = connect_to_plex()
-        
+
         # Search for the media
         if library_name:
             library, error = find_library_section(plex, library_name)
@@ -556,14 +556,21 @@ async def media_edit_metadata(media_title: str, library_name: str = None,
                 return error
             results = library.search(title=media_title)
         else:
-                results = plex.search(query=media_title)
-        
+            results = plex.search(query=media_title)
+
         if not results:
             return f"No media found matching '{media_title}'."
-        
+
         if len(results) > 1:
-            return f"Multiple items found with title '{media_title}'. Please specify a library or use a more specific title."
-        
+            # Multiple results found - provide detailed information
+            items_info = []
+            for item in results:
+                lib_name = getattr(item, 'librarySectionTitle', 'Unknown')
+                item_type = getattr(item, 'type', 'unknown')
+                year = getattr(item, 'year', 'N/A')
+                items_info.append(f"  - '{item.title}' ({year}) in library '{lib_name}' (type: {item_type})")
+            return f"Multiple items found with title '{media_title}':\n" + "\n".join(items_info) + "\n\nPlease specify a library name to narrow down the search."
+
         media = results[0]
         changes_made = []
         
@@ -1061,7 +1068,15 @@ async def media_set_artwork(media_title: str, library_name: str = None,
         }
         
         plex = connect_to_plex()
-        
+
+        # Extract year from filepath if present (e.g., "Title (1938).jpg")
+        year_from_file = None
+        if filepath:
+            import re
+            year_match = re.search(r'\((\d{4})\)', os.path.basename(filepath))
+            if year_match:
+                year_from_file = int(year_match.group(1))
+
         # Search for the media
         if library_name:
             library, error = find_library_section(plex, library_name)
@@ -1070,14 +1085,43 @@ async def media_set_artwork(media_title: str, library_name: str = None,
             results = library.search(title=media_title)
         else:
             results = plex.search(query=media_title)
-        
+
         if not results:
             return f"No media found matching '{media_title}'."
-        
-        if len(results) > 1:
-            return f"Multiple items found with title '{media_title}'. Please specify a library or use a more specific title."
-        
-        media = results[0]
+
+        # If multiple results, try to narrow down by year from filename
+        if len(results) > 1 and year_from_file:
+            year_matches = [r for r in results if hasattr(r, 'year') and r.year == year_from_file]
+            if len(year_matches) == 1:
+                media = year_matches[0]
+            elif len(year_matches) > 1:
+                # Still multiple matches even with year, show info
+                items_info = []
+                for item in year_matches:
+                    lib_name = getattr(item, 'librarySectionTitle', 'Unknown')
+                    item_type = getattr(item, 'type', 'unknown')
+                    items_info.append(f"  - '{item.title}' ({item.year}) in library '{lib_name}' (type: {item_type})")
+                return f"Multiple items found with title '{media_title}' and year {year_from_file}:\n" + "\n".join(items_info) + "\n\nPlease specify a library name."
+            else:
+                # No year matches, show all results
+                items_info = []
+                for item in results:
+                    lib_name = getattr(item, 'librarySectionTitle', 'Unknown')
+                    item_type = getattr(item, 'type', 'unknown')
+                    year = getattr(item, 'year', 'N/A')
+                    items_info.append(f"  - '{item.title}' ({year}) in library '{lib_name}' (type: {item_type})")
+                return f"Multiple items found with title '{media_title}', but none match year {year_from_file} from filename:\n" + "\n".join(items_info) + "\n\nPlease specify a library name or check the filename."
+        elif len(results) > 1:
+            # Multiple results and no year to filter by
+            items_info = []
+            for item in results:
+                lib_name = getattr(item, 'librarySectionTitle', 'Unknown')
+                item_type = getattr(item, 'type', 'unknown')
+                year = getattr(item, 'year', 'N/A')
+                items_info.append(f"  - '{item.title}' ({year}) in library '{lib_name}' (type: {item_type})")
+            return f"Multiple items found with title '{media_title}':\n" + "\n".join(items_info) + "\n\nPlease specify a library name to narrow down the search."
+        else:
+            media = results[0]
         
         # Check if the object supports this art type
         upload_method = upload_map.get(art_type)

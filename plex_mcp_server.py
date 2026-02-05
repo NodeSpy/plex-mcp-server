@@ -109,21 +109,22 @@ def create_starlette_app(mcp_server: Server, *, debug: bool = False) -> Starlett
         ],
     )
 
-if __name__ == "__main__":
+def main():
+    """Main entry point for the Plex MCP Server."""
     # Setup command line arguments
     parser = argparse.ArgumentParser(description='Run Plex MCP Server')
-    parser.add_argument('--transport', choices=['stdio', 'sse'], default='sse', 
+    parser.add_argument('--transport', choices=['stdio', 'sse'], default='stdio',
                         help='Transport method to use (stdio or sse)')
     parser.add_argument('--host', default='0.0.0.0', help='Host to bind to (for SSE)')
     parser.add_argument('--port', type=int, default=3001, help='Port to listen on (for SSE)')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
-    
+
     args = parser.parse_args()
-    
+
     # Initialize and run the server
     print(f"Starting Plex MCP Server with {args.transport} transport...")
     print("Set PLEX_URL and PLEX_TOKEN environment variables for connection")
-    
+
     if args.transport == 'stdio':
         # Run with stdio transport (original method)
         mcp.run(transport='stdio')
@@ -134,3 +135,6 @@ if __name__ == "__main__":
         print(f"Starting SSE server on http://{args.host}:{args.port}")
         print("Access the SSE endpoint at /sse")
         uvicorn.run(starlette_app, host=args.host, port=args.port)
+
+if __name__ == "__main__":
+    main()

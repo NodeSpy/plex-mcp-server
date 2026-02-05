@@ -2,3 +2,11 @@
 __pycache__
 /modules/__pycache__
 .venv
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Claude Code
+.claude/

@@ -52,20 +52,83 @@ or
 python3 plex_mcp_server.py --transport stdio
 ```
 
-#### Configuration Example for Claude Desktop/Cursor
-Add this configuration to your application's settings:
+#### Configuration for Claude Desktop (Using uvx - Recommended)
+
+The recommended way to use this MCP server with Claude Desktop is via `uvx`, which automatically manages dependencies and environments.
+
+Add this configuration to your Claude Desktop config file:
+- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
 ```json
 {
-  "plex": {
-    "command": "python",
-    "args": [
-      "C://Users//User//Documents//plex-mcp-server//plex_mcp_server.py",
-      "--transport=stdio"
-    ],
-    "env": {
-      "PLEX_URL":"http://localhost:32400",
-      "PLEX_TOKEN":"av3khi56h634v3",
-      "PLEX_USERNAME:"Administrator"
+  "mcpServers": {
+    "plex": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/NodeSpy/plex-mcp-server",
+        "plex-mcp-server"
+      ],
+      "env": {
+        "PLEX_URL": "https://your-plex-server:32400",
+        "PLEX_TOKEN": "your-plex-token-here"
+      }
+    }
+  }
+}
+```
+
+**Important Notes:**
+- The `git+` prefix tells uvx to install directly from the GitHub repository
+- Use `https://` for HTTPS connections (most Plex servers require this)
+- Replace `your-plex-server` with your Plex server's IP address or hostname
+- Replace `your-plex-token-here` with your actual Plex authentication token
+- SSL certificate verification is automatically disabled for self-signed certificates
+
+**Alternative: Using a Local Clone**
+
+If you prefer to use a local clone of the repository:
+
+```json
+{
+  "mcpServers": {
+    "plex": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "/path/to/plex-mcp-server",
+        "plex-mcp-server"
+      ],
+      "env": {
+        "PLEX_URL": "https://your-plex-server:32400",
+        "PLEX_TOKEN": "your-plex-token-here"
+      }
+    }
+  }
+}
+```
+
+Replace `/path/to/plex-mcp-server` with the absolute path to your cloned repository.
+
+#### Alternative Configuration (Direct Python)
+
+If you prefer not to use uvx, you can run it directly with Python:
+
+```json
+{
+  "mcpServers": {
+    "plex": {
+      "command": "python3",
+      "args": [
+        "/path/to/plex-mcp-server/plex_mcp_server.py",
+        "--transport",
+        "stdio"
+      ],
+      "env": {
+        "PLEX_URL": "https://192.168.24.60:32400",
+        "PLEX_TOKEN": "your-plex-token-here"
+      }
     }
   }
 }

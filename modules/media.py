@@ -238,7 +238,7 @@ async def media_get_details(media_title: str = None, media_id: int = None, libra
                     target_section, error = find_library_section(plex, library_name)
                     if error:
                         return json.dumps({"status": "error", "message": error}, indent=4)
-                    results = target_section.search(query=media_title)
+                    results = target_section.search(title=media_title)
                 except Exception as e:
                     return json.dumps({"status": "error", "message": f"Error searching library '{library_name}': {str(e)}"}, indent=4)
             else:
@@ -554,7 +554,7 @@ async def media_edit_metadata(media_title: str, library_name: str = None,
             library, error = find_library_section(plex, library_name)
             if error:
                 return error
-            results = library.search(query=media_title)
+            results = library.search(title=media_title)
         else:
                 results = plex.search(query=media_title)
         
@@ -722,7 +722,7 @@ async def media_get_artwork(media_title: str = None, media_id: int = None, libra
                 library, error = find_library_section(plex, library_name)
                 if error:
                     return json.dumps({"error": error}, indent=4)
-                results = library.search(query=media_title)
+                results = library.search(title=media_title)
             else:
                 # Search in all libraries
                 results = plex.search(query=media_title)
@@ -911,7 +911,7 @@ async def media_delete(media_title: str = None, media_id: int = None, library_na
                 library, error = find_library_section(plex, library_name)
                 if error:
                     return json.dumps({"error": error}, indent=4)
-                results = library.search(query=media_title)
+                results = library.search(title=media_title)
             else:
                 # Search in all libraries
                 results = plex.search(query=media_title)
@@ -1067,7 +1067,7 @@ async def media_set_artwork(media_title: str, library_name: str = None,
             library, error = find_library_section(plex, library_name)
             if error:
                 return error
-            results = library.search(query=media_title)
+            results = library.search(title=media_title)
         else:
             results = plex.search(query=media_title)
         
@@ -1158,7 +1158,7 @@ async def media_list_available_artwork(media_title: str = None, media_id: int = 
                 library, error = find_library_section(plex, library_name)
                 if error:
                     return json.dumps({"error": error}, indent=4)
-                results = library.search(query=media_title)
+                results = library.search(title=media_title)
             else:
                 results = plex.search(query=media_title)
             

@@ -1,4 +1,5 @@
 from modules import mcp, connect_to_plex
+from modules.library import find_library_section
 from typing import List
 from plexapi.exceptions import NotFound # type: ignore
 import base64
@@ -234,7 +235,9 @@ async def media_get_details(media_title: str = None, media_id: int = None, libra
             results = []
             if library_name:
                 try:
-                    target_section = plex.library.section(library_name)
+                    target_section, error = find_library_section(plex, library_name)
+                    if error:
+                        return json.dumps({"status": "error", "message": error}, indent=4)
                     results = target_section.search(query=media_title)
                 except Exception as e:
                     return json.dumps({"status": "error", "message": f"Error searching library '{library_name}': {str(e)}"}, indent=4)
@@ -548,11 +551,10 @@ async def media_edit_metadata(media_title: str, library_name: str = None,
         
         # Search for the media
         if library_name:
-            try:
-                library = plex.library.section(library_name)
-                results = library.search(query=media_title)
-            except NotFound:
-                return f"Library '{library_name}' not found."
+            library, error = find_library_section(plex, library_name)
+            if error:
+                return error
+            results = library.search(query=media_title)
         else:
                 results = plex.search(query=media_title)
         
@@ -717,11 +719,10 @@ async def media_get_artwork(media_title: str = None, media_id: int = None, libra
             # Search for the media by title
             results = []
             if library_name:
-                try:
-                    library = plex.library.section(library_name)
-                    results = library.search(query=media_title)
-                except NotFound:
-                    return json.dumps({"error": f"Library '{library_name}' not found"}, indent=4)
+                library, error = find_library_section(plex, library_name)
+                if error:
+                    return json.dumps({"error": error}, indent=4)
+                results = library.search(query=media_title)
             else:
                 # Search in all libraries
                 results = plex.search(query=media_title)
@@ -907,11 +908,10 @@ async def media_delete(media_title: str = None, media_id: int = None, library_na
             # Search for the media by title
             results = []
             if library_name:
-                try:
-                    library = plex.library.section(library_name)
-                    results = library.search(query=media_title)
-                except NotFound:
-                    return json.dumps({"error": f"Library '{library_name}' not found"}, indent=4)
+                library, error = find_library_section(plex, library_name)
+                if error:
+                    return json.dumps({"error": error}, indent=4)
+                results = library.search(query=media_title)
             else:
                 # Search in all libraries
                 results = plex.search(query=media_title)
@@ -1064,11 +1064,10 @@ async def media_set_artwork(media_title: str, library_name: str = None,
         
         # Search for the media
         if library_name:
-            try:
-                library = plex.library.section(library_name)
-                results = library.search(query=media_title)
-            except NotFound:
-                return f"Library '{library_name}' not found."
+            library, error = find_library_section(plex, library_name)
+            if error:
+                return error
+            results = library.search(query=media_title)
         else:
             results = plex.search(query=media_title)
         
@@ -1156,11 +1155,10 @@ async def media_list_available_artwork(media_title: str = None, media_id: int = 
         else:
             # Search for the media by title
             if library_name:
-                try:
-                    library = plex.library.section(library_name)
-                    results = library.search(query=media_title)
-                except NotFound:
-                    return json.dumps({"error": f"Library '{library_name}' not found"}, indent=4)
+                library, error = find_library_section(plex, library_name)
+                if error:
+                    return json.dumps({"error": error}, indent=4)
+                results = library.search(query=media_title)
             else:
                 results = plex.search(query=media_title)
             

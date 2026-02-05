@@ -2,6 +2,8 @@ import json
 import requests
 import aiohttp
 import asyncio
+import re
+import ssl
 from plexapi.exceptions import NotFound # type: ignore
 from modules import mcp, connect_to_plex
 from urllib.parse import urljoin
@@ -13,6 +15,81 @@ def get_plex_headers(plex):
         'X-Plex-Token': plex._token,
         'Accept': 'application/json'
     }
+
+def get_ssl_context():
+    """Create an SSL context that doesn't verify certificates for self-signed certs"""
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    return ssl_context
+
+def normalize_string(s):
+    """Normalize a string by removing special characters and extra whitespace."""
+    # Remove special characters except alphanumeric and spaces
+    s = re.sub(r'[^a-zA-Z0-9\s]', '', s)
+    # Replace multiple spaces with single space and strip
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s.lower()
+
+def find_library_section(plex, library_name):
+    """
+    Find a library section with flexible matching.
+
+    Tries multiple matching strategies:
+    1. Exact match (case-insensitive)
+    2. Normalized match (ignoring special characters and extra spaces)
+    3. Substring match (library name contains search term)
+
+    Args:
+        plex: PlexServer instance
+        library_name: Name of the library to find
+
+    Returns:
+        tuple: (section, error_message)
+            - If found: (section_object, None)
+            - If not found: (None, error_message)
+            - If multiple matches: (None, error_message_with_options)
+    """
+    all_sections = plex.library.sections()
+
+    if not all_sections:
+        return None, "No libraries found on your Plex server."
+
+    # Strategy 1: Exact match (case-insensitive)
+    for section in all_sections:
+        if section.title.lower() == library_name.lower():
+            return section, None
+
+    # Strategy 2: Normalized match (remove special chars and extra spaces)
+    normalized_search = normalize_string(library_name)
+    normalized_matches = []
+
+    for section in all_sections:
+        if normalize_string(section.title) == normalized_search:
+            normalized_matches.append(section)
+
+    if len(normalized_matches) == 1:
+        return normalized_matches[0], None
+    elif len(normalized_matches) > 1:
+        match_names = [s.title for s in normalized_matches]
+        return None, f"Multiple libraries match '{library_name}': {', '.join(match_names)}. Please be more specific."
+
+    # Strategy 3: Substring match (library name contains search term)
+    substring_matches = []
+
+    for section in all_sections:
+        if normalized_search in normalize_string(section.title):
+            substring_matches.append(section)
+
+    if len(substring_matches) == 1:
+        return substring_matches[0], None
+    elif len(substring_matches) > 1:
+        match_names = [s.title for s in substring_matches]
+        return None, f"Multiple libraries match '{library_name}': {', '.join(match_names)}. Please use the exact library name."
+
+    # No matches found
+    available = ', '.join([s.title for s in all_sections])
+    return None, f"Library '{library_name}' not found. Available libraries: {available}"
 
 async def async_get_json(session, url, headers):
     """Helper function to make async HTTP requests"""
@@ -47,7 +124,7 @@ async def library_list() -> str:
 @mcp.tool()
 async def library_get_stats(library_name: str) -> str:
     """Get statistics for a specific library.
-    
+
     Args:
         library_name: Name of the library to get stats for
     """
@@ -55,20 +132,59 @@ async def library_get_stats(library_name: str) -> str:
         plex = connect_to_plex()
         base_url = plex._baseurl
         headers = get_plex_headers(plex)
-        
-        async with aiohttp.ClientSession() as session:
+
+        # Create SSL context for self-signed certificates
+        ssl_context = get_ssl_context()
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+
+        async with aiohttp.ClientSession(connector=connector) as session:
             # First get library sections
             sections_url = urljoin(base_url, 'library/sections')
             sections_data = await async_get_json(session, sections_url, headers)
-            
+
+            # Use flexible matching to find the target section
+            all_sections = sections_data['MediaContainer']['Directory']
             target_section = None
-            for section in sections_data['MediaContainer']['Directory']:
+
+            # Strategy 1: Exact match (case-insensitive)
+            for section in all_sections:
                 if section['title'].lower() == library_name.lower():
                     target_section = section
                     break
-                    
+
+            # Strategy 2: Normalized match
             if not target_section:
-                return json.dumps({"error": f"Library '{library_name}' not found"})
+                normalized_search = normalize_string(library_name)
+                normalized_matches = []
+
+                for section in all_sections:
+                    if normalize_string(section['title']) == normalized_search:
+                        normalized_matches.append(section)
+
+                if len(normalized_matches) == 1:
+                    target_section = normalized_matches[0]
+                elif len(normalized_matches) > 1:
+                    match_names = [s['title'] for s in normalized_matches]
+                    return json.dumps({"error": f"Multiple libraries match '{library_name}': {', '.join(match_names)}. Please be more specific."})
+
+            # Strategy 3: Substring match
+            if not target_section:
+                normalized_search = normalize_string(library_name)
+                substring_matches = []
+
+                for section in all_sections:
+                    if normalized_search in normalize_string(section['title']):
+                        substring_matches.append(section)
+
+                if len(substring_matches) == 1:
+                    target_section = substring_matches[0]
+                elif len(substring_matches) > 1:
+                    match_names = [s['title'] for s in substring_matches]
+                    return json.dumps({"error": f"Multiple libraries match '{library_name}': {', '.join(match_names)}. Please use the exact library name."})
+
+            if not target_section:
+                available = ', '.join([s['title'] for s in all_sections])
+                return json.dumps({"error": f"Library '{library_name}' not found. Available libraries: {available}"})
                 
             section_id = target_section['key']
             library_type = target_section['type']
@@ -290,27 +406,20 @@ async def library_get_stats(library_name: str) -> str:
 @mcp.tool()
 async def library_refresh(library_name: str = None) -> str:
     """Refresh a specific library or all libraries.
-    
+
     Args:
         library_name: Optional name of the library to refresh (refreshes all if None)
     """
     try:
         plex = connect_to_plex()
-        
+
         if library_name:
-            # Refresh a specific library
-            section = None
-            all_sections = plex.library.sections()
-            
-            # Find the section with matching name (case-insensitive)
-            for s in all_sections:
-                if s.title.lower() == library_name.lower():
-                    section = s
-                    break
-            
+            # Refresh a specific library using flexible matching
+            section, error = find_library_section(plex, library_name)
+
             if not section:
-                return json.dumps({"error": f"Library '{library_name}' not found. Available libraries: {', '.join([s.title for s in all_sections])}"})
-            
+                return json.dumps({"error": error})
+
             # Refresh the library
             section.refresh()
             return json.dumps({"success": True, "message": f"Refreshing library '{section.title}'. This may take some time."})
@@ -324,27 +433,20 @@ async def library_refresh(library_name: str = None) -> str:
 @mcp.tool()
 async def library_scan(library_name: str, path: str = None) -> str:
     """Scan a specific library or part of a library.
-    
+
     Args:
         library_name: Name of the library to scan
         path: Optional specific path to scan within the library
     """
     try:
         plex = connect_to_plex()
-        
-        # Find the specified library
-        section = None
-        all_sections = plex.library.sections()
-        
-        # Find the section with matching name (case-insensitive)
-        for s in all_sections:
-            if s.title.lower() == library_name.lower():
-                section = s
-                break
-        
+
+        # Find the specified library using flexible matching
+        section, error = find_library_section(plex, library_name)
+
         if not section:
-            return json.dumps({"error": f"Library '{library_name}' not found. Available libraries: {', '.join([s.title for s in all_sections])}"})
-        
+            return json.dumps({"error": error})
+
         # Scan the library
         if path:
             try:
@@ -361,26 +463,19 @@ async def library_scan(library_name: str, path: str = None) -> str:
 @mcp.tool()
 async def library_get_details(library_name: str) -> str:
     """Get detailed information about a specific library, including folder paths and settings.
-    
+
     Args:
         library_name: Name of the library to get details for
     """
     try:
         plex = connect_to_plex()
-        
-        # Get all library sections
-        all_sections = plex.library.sections()
-        target_section = None
-        
-        # Find the section with the matching name (case-insensitive)
-        for section in all_sections:
-            if section.title.lower() == library_name.lower():
-                target_section = section
-                break
-        
+
+        # Find the library using flexible matching
+        target_section, error = find_library_section(plex, library_name)
+
         if not target_section:
-            return json.dumps({"error": f"Library '{library_name}' not found. Available libraries: {', '.join([s.title for s in all_sections])}"})
-        
+            return json.dumps({"error": error})
+
         # Create the result dictionary
         result = {
             "name": target_section.title,
@@ -392,10 +487,10 @@ async def library_get_details(library_name: str) -> str:
             "scanner": target_section.scanner,
             "language": target_section.language
         }
-        
+
         # Get additional attributes using _data
         data = target_section._data
-        
+
         # Add scanner settings if available
         if 'scannerSettings' in data:
             scanner_settings = {}
@@ -404,7 +499,7 @@ async def library_get_details(library_name: str) -> str:
                     scanner_settings[setting.get('key', 'unknown')] = setting['value']
             if scanner_settings:
                 result["scannerSettings"] = scanner_settings
-        
+
         # Add agent settings if available
         if 'agentSettings' in data:
             agent_settings = {}
@@ -413,7 +508,7 @@ async def library_get_details(library_name: str) -> str:
                     agent_settings[setting.get('key', 'unknown')] = setting['value']
             if agent_settings:
                 result["agentSettings"] = agent_settings
-        
+
         # Add advanced settings if available
         if 'advancedSettings' in data:
             advanced_settings = {}
@@ -422,7 +517,7 @@ async def library_get_details(library_name: str) -> str:
                     advanced_settings[setting.get('key', 'unknown')] = setting['value']
             if advanced_settings:
                 result["advancedSettings"] = advanced_settings
-                
+
         return json.dumps(result)
     except Exception as e:
         return json.dumps({"error": f"Error getting library details: {str(e)}"})
@@ -430,29 +525,22 @@ async def library_get_details(library_name: str) -> str:
 @mcp.tool()
 async def library_get_recently_added(count: int = 50, library_name: str = None) -> str:
     """Get recently added media across all libraries or in a specific library.
-    
+
     Args:
         count: Number of items to return (default: 50)
         library_name: Optional library name to limit results to
     """
     try:
         plex = connect_to_plex()
-        
+
         # Check if we need to filter by library
         if library_name:
-            # Find the specified library
-            section = None
-            all_sections = plex.library.sections()
-            
-            # Find the section with matching name (case-insensitive)
-            for s in all_sections:
-                if s.title.lower() == library_name.lower():
-                    section = s
-                    break
-            
+            # Find the specified library using flexible matching
+            section, error = find_library_section(plex, library_name)
+
             if not section:
-                return json.dumps({"error": f"Library '{library_name}' not found. Available libraries: {', '.join([s.title for s in all_sections])}"})
-            
+                return json.dumps({"error": error})
+
             # Get recently added from this library
             recent = section.recentlyAdded(maxresults=count)
         else:
@@ -558,10 +646,10 @@ async def library_get_recently_added(count: int = 50, library_name: str = None) 
 @mcp.tool()
 async def library_get_contents(library_name: str) -> str:
     """Get the full contents of a specific library.
-    
+
     Args:
         library_name: Name of the library to get contents from
-    
+
     Returns:
         String listing all items in the library
     """
@@ -569,20 +657,59 @@ async def library_get_contents(library_name: str) -> str:
         plex = connect_to_plex()
         base_url = plex._baseurl
         headers = get_plex_headers(plex)
-        
-        async with aiohttp.ClientSession() as session:
+
+        # Create SSL context for self-signed certificates
+        ssl_context = get_ssl_context()
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+
+        async with aiohttp.ClientSession(connector=connector) as session:
             # First get library sections
             sections_url = urljoin(base_url, 'library/sections')
             sections_data = await async_get_json(session, sections_url, headers)
-            
+
+            # Use flexible matching to find the target section
+            all_sections = sections_data['MediaContainer']['Directory']
             target_section = None
-            for section in sections_data['MediaContainer']['Directory']:
+
+            # Strategy 1: Exact match (case-insensitive)
+            for section in all_sections:
                 if section['title'].lower() == library_name.lower():
                     target_section = section
                     break
-                    
+
+            # Strategy 2: Normalized match
             if not target_section:
-                return json.dumps({"error": f"Library '{library_name}' not found"})
+                normalized_search = normalize_string(library_name)
+                normalized_matches = []
+
+                for section in all_sections:
+                    if normalize_string(section['title']) == normalized_search:
+                        normalized_matches.append(section)
+
+                if len(normalized_matches) == 1:
+                    target_section = normalized_matches[0]
+                elif len(normalized_matches) > 1:
+                    match_names = [s['title'] for s in normalized_matches]
+                    return json.dumps({"error": f"Multiple libraries match '{library_name}': {', '.join(match_names)}. Please be more specific."})
+
+            # Strategy 3: Substring match
+            if not target_section:
+                normalized_search = normalize_string(library_name)
+                substring_matches = []
+
+                for section in all_sections:
+                    if normalized_search in normalize_string(section['title']):
+                        substring_matches.append(section)
+
+                if len(substring_matches) == 1:
+                    target_section = substring_matches[0]
+                elif len(substring_matches) > 1:
+                    match_names = [s['title'] for s in substring_matches]
+                    return json.dumps({"error": f"Multiple libraries match '{library_name}': {', '.join(match_names)}. Please use the exact library name."})
+
+            if not target_section:
+                available = ', '.join([s['title'] for s in all_sections])
+                return json.dumps({"error": f"Library '{library_name}' not found. Available libraries: {available}"})
             
             section_id = target_section['key']
             library_type = target_section['type']
